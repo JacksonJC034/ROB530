@@ -16,6 +16,20 @@ def func(x):
     # Hint: it is used on unscented transform                                     #
     ###############################################################################
     
+    # Assuming x = [v, omega, gamma] in the Lie algebra se(2)
+    v = x[0]
+    omega = x[1]
+    gamma = x[2]  # Though gamma is always commanded to zero, included for completeness
+
+    if omega == 0:  # Avoid division by zero
+        omega = 1e-5
+
+    delta_theta = omega + gamma
+    delta_x = v / omega * (np.sin(delta_theta) - np.sin(0))
+    delta_y = v / omega * (-np.cos(delta_theta) + np.cos(0))
+
+    # Output y represents the change in Cartesian coordinates
+    y = np.array([delta_x, delta_y, delta_theta])
     
     ###############################################################################
     #                         END OF YOUR CODE                                    #
@@ -66,7 +80,18 @@ def lieToCartesian(mean, cov):
     # Hint: you can use unscented transform                                       #
     # Hint: save the mean and cov as mu_cart and Sigma_cart                       #
     ###############################################################################
+    # Implementing the transformation from Lie algebra to Cartesian coordinates using unscented transform
     
+    kappa = 3 - np.size(mean)  # Choosing kappa based on the dimensionality of the state
+
+    # Utilizing unscented transform to approximate the mean and covariance in Cartesian space
+    Sigma_cart = unscented_propagate(mean, cov, kappa)
+
+    # For the mean, we directly apply the exponential map to the Lie algebra element to get the pose in SE(2)
+    mu_se2 = expm(np.array([[0, -mean[2], mean[0]],
+                            [mean[2], 0, mean[1]],
+                            [0, 0, 0]]))
+    mu_cart = np.array([mu_se2[0, 2], mu_se2[1, 2], np.arctan2(mu_se2[1, 0], mu_se2[0, 0])])
     
     ###############################################################################
     #                         END OF YOUR CODE                                    #
@@ -89,13 +114,26 @@ def mahalanobis(state, ground_truth, filter_name, Lie2Cart):
     #       For InEKF, if Lie2Cart flag is true, you should use                   #
     #       state.getCartesianState() and state.getCartesianCovariance() instead. #
     ###############################################################################
-
+    if Lie2Cart:
+        mu, Sigma = state.getCartesianState(), state.getCartesianCovariance()
+    else:
+        mu, Sigma = state.getState(), state.getCovariance()
+    
+    diff = ground_truth - mu
+    diff[2] = wrap2Pi(diff[2])  # Ensure theta difference is within [-pi, pi]
+    
+    # Calculating the Mahalanobis distance
+    M_distance = np.sqrt(np.dot(np.dot(diff.T, np.linalg.inv(Sigma)), diff))
+    
+    # Preparing the results
+    results = np.array([M_distance, diff[0], diff[1], diff[2], 
+                        3*np.sqrt(Sigma[0, 0]), 3*np.sqrt(Sigma[1, 1]), 3*np.sqrt(Sigma[2, 2])])
 
     
     ###############################################################################
     #                         END OF YOUR CODE                                    #
     ###############################################################################
-        return results.reshape(-1)
+    return results.reshape(-1)
     
 
 def plot_error(results, gt):

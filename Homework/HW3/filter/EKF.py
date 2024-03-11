@@ -40,7 +40,17 @@ class EKF:
         # TODO: Implement the prediction step for EKF                                 #
         # Hint: save your predicted state and cov as X_pred and P_pred                #
         ###############################################################################
-
+        
+        # Predict the state using the motion model
+        X_pred = self.gfun(X, u)
+        
+        # Calculate the Jacobian of the motion model
+        G = self.Gfun(X, u)
+        V = self.Vfun(X, u)
+        
+        # Predict the state covariance
+        M_noise = self.M(u)
+        P_pred = G @ P @ G.T + V @ M_noise @ V.T
 
         ###############################################################################
         #                         END OF YOUR CODE                                    #
@@ -59,8 +69,8 @@ class EKF:
         X_predict = X
         P_predict = P
         
-        landmark1 = landmarks.getLandmark(z[2].astype(int))
-        landmark2 = landmarks.getLandmark(z[5].astype(int))
+        # landmark1 = landmarks.getLandmark(z[2].astype(int))
+        # landmark2 = landmarks.getLandmark(z[5].astype(int))
 
         ###############################################################################
         # TODO: Implement the correction step for EKF                                 #
@@ -68,7 +78,31 @@ class EKF:
         # Hint: you can use landmark1.getPosition()[0] to get the x position of 1st   #
         #       landmark, and landmark1.getPosition()[1] to get its y position        #
         ###############################################################################
+        
+        for i in range(0, len(z), 3):
+            landmark = landmarks.getLandmark(z[i+2].astype(int))
+            landmark_pos = landmark.getPosition()
+            
+            # Expected measurement for the current state estimate
+            z_hat = self.hfun(landmark_pos[0], landmark_pos[1], X_predict)
+            
+            # Compute the Jacobian of the measurement model
+            H = self.Hfun(landmark_pos[0], landmark_pos[1], X_predict, z_hat)
+            
+            # Kalman gain
+            S = H @ P_predict @ H.T + self.Q
+            K = P_predict @ H.T @ np.linalg.inv(S)
+            
+            # Measurement residual
+            z_residual = z[i:i+2] - z_hat
+            z_residual[0] = wrap2Pi(z_residual[0])  # Ensure bearing angle is within -pi to pi
+            
+            # Update state estimate and covariance
+            X = X_predict + K @ z_residual
+            P = (np.eye(len(P)) - K @ H) @ P_predict
 
+            X_predict = X
+            P_predict = P
 
         ###############################################################################
         #                         END OF YOUR CODE                                    #

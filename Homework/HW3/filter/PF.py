@@ -47,7 +47,9 @@ class PF:
         # Hint: Use rng.standard_normal instead of np.random.randn.                   #
         #       It is statistically more random.                                      #
         ###############################################################################
-
+        for i in range(self.n):
+            noise = self.M(u) @ rng.standard_normal(3)
+            self.particles[:, i] = self.gfun(self.particles[:, i], u) + noise
 
 
         ###############################################################################
@@ -70,7 +72,17 @@ class PF:
         # Hint: you can use landmark1.getPosition()[0] to get the x position of 1st   #
         #       landmark, and landmark1.getPosition()[1] to get its y position        #
         ###############################################################################
+        for i in range(self.n):
+            predicted_measurement1 = self.hfun(landmark1.getPosition()[0], landmark1.getPosition()[1], self.particles[:, i])
+            predicted_measurement2 = self.hfun(landmark2.getPosition()[0], landmark2.getPosition()[1], self.particles[:, i])
+            likelihood1 = multivariate_normal.pdf(z[:2], mean=predicted_measurement1, cov=self.Q)
+            likelihood2 = multivariate_normal.pdf(z[3:5], mean=predicted_measurement2, cov=self.Q)
+            self.particle_weight[i] = likelihood1 * likelihood2
+        
+        self.particle_weight += 1.e-300      # avoid round-off to zero
+        self.particle_weight /= sum(self.particle_weight)  # normalize
 
+        self.resample()
 
         ###############################################################################
         #                         END OF YOUR CODE                                    #
