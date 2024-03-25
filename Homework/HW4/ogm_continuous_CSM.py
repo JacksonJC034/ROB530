@@ -7,12 +7,21 @@ import numpy as np
 from scipy.spatial import KDTree
 from tqdm import tqdm
 
+def kernel(d, sigma, l):
+    if d < l:
+        kernel = sigma * (1/3 * (2 + np.cos(2 * np.pi * d / l)) * (1 - d / l) + 1/2 / np.pi * np.sin(2 * np.pi * d / l))
+    elif d > l:
+        kernel = 0
+    return kernel
+
 def continuous_CSM(map, pose, m_i, sigma, l, z, i, k):
     bearing_diff = []
     # find the nearest beam
     bearing_diff = np.abs(wrapToPI(z[:, 1] - m_i['phi']))
     # idx = np.nanargmin(bearing_diff)
     indexes = np.argpartition(bearing_diff, 1)
+    # define min distance as infinity
+    minDist = np.inf
     for idx in indexes[:1]:
         global_x = pose['x'][k][0] + z[idx,0] * np.cos(z[idx,1] + pose['h'][k][0])
         global_y = pose['y'][k][0] + z[idx,0] * np.sin(z[idx,1] + pose['h'][k][0])
@@ -28,6 +37,32 @@ def continuous_CSM(map, pose, m_i, sigma, l, z, i, k):
         # than l  
         # -----------------------------------------------
         # update end point -> occupied
+        # 
+        # Hint: use step size = l * (2/3) when finding sample points along the beam
+        x_k_star = np.array([global_x, global_y])  # Global coordinates of the k-th scan's endpoint
+
+        # Step 3: Distance from cell to beam endpoint
+        d_1 = np.linalg.norm([map['occMap'].data[i, 0] - x_k_star[0], map['occMap'].data[i, 1] - x_k_star[1]])
+        # Update for occupied space (end point)
+        if d_1 < l:
+            map['alpha'][i] += kernel(d_1, sigma, l)
+        else:
+            # Step 8-14: Sampling along the beam to find closest sample point to update free space
+            step_size = l * (2/3)
+            num_samples = int(z[idx, 0] / step_size) + 1  # Number of sample points along the beam
+            for n in range(num_samples):
+                sample_dist = n * step_size
+                if sample_dist < z[idx, 0]:  # Ensure we are not exceeding the beam length
+                    sample_x = pose['x'][k][0] + sample_dist * np.cos(z[idx, 1] + pose['h'][k][0])
+                    sample_y = pose['y'][k][0] + sample_dist * np.sin(z[idx, 1] + pose['h'][k][0])
+                    sample_point = np.array([sample_x, sample_y])
+                    d_2 = np.linalg.norm([map['occMap'].data[i, 0] - sample_point[0], map['occMap'].data[i, 1] - sample_point[1]])
+                    if d_2 < minDist:
+                        minDist = d_2
+            if minDist < l:
+                map['beta'][i] += kernel(minDist, sigma, l)
+        
+        
 
 
 # Occupancy Grid Mapping Class
@@ -64,8 +99,8 @@ class ogm_continuous_CSM:
         # prior initialization
         # Initialize prior, prior_alpha
         # -----------------------------------------------
-        # self.prior =             # prior for setting up mean and variance
-        # self.prior_alpha =       # a small, uninformative prior for setting up alpha
+        self.prior = 0.001            # prior for setting up mean and variance
+        self.prior_alpha = 0.001      # a small, uninformative prior for setting up alpha
 
     def construct_map(self, pose, scan):
         # class constructor
@@ -90,11 +125,11 @@ class ogm_continuous_CSM:
         # To Do: 
         # Initialization map parameters such as map['mean'], map['variance'], map['alpha'], map['beta']
         # -----------------------------------------------
-        # self.map['mean'] =        # size should be (number of data) x (1)
-        # self.map['variance'] =    # size should be (number of data) x (1)
-        # self.map['alpha'] =       # size should be (number of data) x (1)
-        # self.map['beta'] =        # size should be (number of data) x (1) 
-
+        self.map['mean'] = np.zeros((self.map['size'], 1))       # size should be (number of data) x (1)
+        self.map['variance'] = np.zeros((self.map['size'], 1))   # size should be (number of data) x (1)
+        self.map['alpha'] = np.ones((self.map['size'], 1)) * self.prior_alpha      # size should be (number of data) x (1)
+        self.map['beta'] = np.ones((self.map['size'], 1)) * self.prior_alpha       # size should be (number of data) x (1) 
+        
 
     def is_in_perceptual_field(self, m, p):
         # check if the map cell m is within the perception field of the
@@ -132,14 +167,14 @@ class ogm_continuous_CSM:
                         # To Do: 
                         # update the sensor model in cell i
                         # -----------------------------------------------
-                        # self.continuous_CSM(self.map, self.pose, self.m_i, self.sigma, self.l, ...)
+                        self.continuous_CSM(self.map, self.pose, self.m_i, self.sigma, self.l, z, i, k)
 
             # -----------------------------------------------
             # To Do: 
             # update mean and variance for each cell i
             # -----------------------------------------------
-            # self.map['mean'][i] = 
-            # self.map['variance'][i] = 
+            self.map['mean'][i] = self.map['alpha'][i] / (self.map['alpha'][i] + self.map['beta'][i])
+            self.map['variance'][i] = (self.map['alpha'][i] * self.map['beta'][i]) / ((self.map['alpha'][i] + self.map['beta'][i])**2 * (self.map['alpha'][i] + self.map['beta'][i] + 1))
 
 
 # This function is used to convert Cartesian to Polar

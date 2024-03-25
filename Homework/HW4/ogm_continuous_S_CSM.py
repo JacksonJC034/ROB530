@@ -7,6 +7,13 @@ import numpy as np
 from scipy.spatial import KDTree
 from tqdm import tqdm
 
+def kernel(d, sigma, l):
+    if d < l:
+        kernel = sigma * (1/3 * (2 + np.cos(2 * np.pi * d / l)) * (1 - d / l) + 1/2 / np.pi * np.sin(2 * np.pi * d / l))
+    elif d > l:
+        kernel = 0
+    return kernel
+
 def continuous_S_CSM(map, pose, m_i, num_classes, sigma, l, z, i, k):
     bearing_diff = []
     # find the nearest beam
@@ -15,6 +22,7 @@ def continuous_S_CSM(map, pose, m_i, num_classes, sigma, l, z, i, k):
     bearing_min = bearing_diff[idx]
     global_x = pose['x'][k][0] + z[idx,0] * np.cos(z[idx,1] + pose['h'][k][0])
     global_y = pose['y'][k][0] + z[idx,0] * np.sin(z[idx,1] + pose['h'][k][0])
+    minDist = np.inf
     # -----------------------------------------------
     # To Do: 
     # implement the continuous counting sensor model, update 
@@ -27,6 +35,28 @@ def continuous_S_CSM(map, pose, m_i, num_classes, sigma, l, z, i, k):
     # than l.  
     # -----------------------------------------------
     # update end point -> occupied
+    x_k_star = np.array([global_x, global_y])  # Global coordinates of the k-th scan's endpoint
+    d_1 = np.linalg.norm([map['occMap'].data[i, 0] - x_k_star[0], map['occMap'].data[i, 1] - x_k_star[1]])
+    # Assuming z[idx,2] contains the semantic label of the endpoint
+    semantic_label = int(z[idx, 2]) - 1  # Convert to integer if not already
+    # Update for occupied space with semantic information
+    if d_1 < l:
+        map['alpha'][i, semantic_label] += kernel(d_1, sigma, l)
+    else:
+        # Step 8-14: Sampling along the beam to find closest sample point to update free space
+        step_size = l * (2/3)
+        num_samples = int(z[idx, 0] / step_size) + 1
+        for n in range(num_samples):
+            sample_dist = n * step_size
+            if sample_dist < z[idx, 0]:  # Ensure we are not exceeding the beam length
+                sample_x = pose['x'][k][0] + sample_dist * np.cos(z[idx, 1] + pose['h'][k][0])
+                sample_y = pose['y'][k][0] + sample_dist * np.sin(z[idx, 1] + pose['h'][k][0])
+                sample_point = np.array([sample_x, sample_y])
+                d_2 = np.linalg.norm([map['occMap'].data[i, 0] - sample_point[0], map['occMap'].data[i, 1] - sample_point[1]])
+                if d_2 < minDist:
+                    minDist = d_2
+        if minDist < l:
+            map['alpha'][i][num_classes] += kernel(minDist, sigma, l)
 
 
 # Occupancy Grid Mapping Class
@@ -66,8 +96,8 @@ class ogm_continuous_S_CSM:
         # prior initialization
         # Initialize prior, prior_alpha
         # -----------------------------------------------
-        # self.prior =             # prior for setting up mean and variance
-        # self.prior_alpha =       # a small, uninformative prior for setting up alpha
+        self.prior = 0.001            # prior for setting up mean and variance
+        self.prior_alpha = 0.001      # a small, uninformative prior for setting up alpha
 
     def construct_map(self, pose, scan):
         # class constructor
@@ -92,9 +122,9 @@ class ogm_continuous_S_CSM:
         # To Do: 
         # Initialization map parameters such as map['mean'], map['variance'], map['alpha']
         # -----------------------------------------------
-        # self.map['mean'] =         # size should be (number of data) x (number of classes + 1)
-        # self.map['variance'] =     # size should be (number of data) x (1)
-        # self.map['alpha'] =        # size should be (number of data) x (number of classes + 1)
+        self.map['mean'] = np.zeros((self.map['size'], self.num_classes + 1))        # size should be (number of data) x (number of classes + 1)
+        self.map['variance'] = np.zeros((self.map['size'], 1))    # size should be (number of data) x (1)
+        self.map['alpha'] = np.ones((self.map['size'], self.num_classes + 1)) * self.prior_alpha       # size should be (number of data) x (number of classes + 1)
 
 
     def is_in_perceptual_field(self, m, p):
@@ -134,14 +164,15 @@ class ogm_continuous_S_CSM:
                         # To Do: 
                         # update the sensor model in cell i
                         # -----------------------------------------------
-                        # self.continuous_S_CSM(self.map, self.pose, self.m_i, self.num_classes, self.sigma, self.l, ...)
+                        self.continuous_S_CSM(self.map, self.pose, self.m_i, self.num_classes, self.sigma, self.l, z, i, k)
 
             # -----------------------------------------------
             # To Do: 
             # update mean and variance for each cell i
             # -----------------------------------------------
-            # self.map['mean'][i] = 
-            # self.map['variance'][i] = 
+            alpha_sum = np.sum(self.map['alpha'][i, :])
+            self.map['mean'][i] = self.map['alpha'][i] / alpha_sum
+            self.map['variance'][i] = (np.max(self.map['alpha'][i, :]) / alpha_sum * (1 - np.max(self.map['alpha'][i, :]) / alpha_sum)) / (alpha_sum + 1)
                 
                 
 # This function is used to convert Cartesian to Polar

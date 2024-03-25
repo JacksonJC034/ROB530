@@ -19,6 +19,15 @@ def counting_sensor_model(map, m_i, z_max, w_obstacle, w_beam, z, i):
     # map['beta']
     # Hint: the way to determine occupied or free is similar to
     # inverse sensor model
+    r = m_i['range']
+    
+    
+    if r > min(z_max, z[k, 0] + w_obstacle / 2) or bearing_min > w_beam / 2:
+        pass  # The map cell is outside of the perception field.
+    elif z[k, 0] < z_max and np.abs(r - z[k, 0]) < w_obstacle / 2:
+        map['alpha'][i] += 1  # Update occupied space.
+    elif r < z[k, 0] and z[k, 0] < z_max:
+        map['beta'][i] += 1  # Update free space.
     # -----------------------------------------------
 
 
@@ -54,8 +63,9 @@ class ogm_CSM:
         # prior initialization
         # Initialize prior, prior_alpha
         # -----------------------------------------------
-        # self.prior =             # prior for setting up mean and variance
-        # self.prior_alpha =       # a small, uninformative prior for setting up alpha
+        self.prior = 0.001            # prior for setting up mean and variance
+        self.prior_alpha = 0.001      # a small, uninformative prior for setting up alpha
+        self.prior_beta = 0.001       # a small, uninformative prior for setting up beta
 
     def construct_map(self, pose, scan):
         # class constructor
@@ -81,10 +91,10 @@ class ogm_CSM:
         # To Do: 
         # Initialization map parameters such as map['mean'], map['variance'], map['alpha'], map['beta']
         # -----------------------------------------------
-        # self.map['mean'] =        # size should be (number of data) x (1)
-        # self.map['variance'] =    # size should be (number of data) x (1)
-        # self.map['alpha'] =       # size should be (number of data) x (1)
-        # self.map['beta'] =        # size should be (number of data) x (1)
+        self.map['alpha'] = np.ones(self.map['size']).reshape(-1,1) * self.prior_alpha   # size should be (number of data) x (1)
+        self.map['beta'] = np.ones(self.map['size']).reshape(-1,1) * self.prior_beta   # size should be (number of data) x (1)
+        self.map['mean'] = np.ones(self.map['size']).reshape(-1,1) * self.prior      # size should be (number of data) x (1)
+        self.map['variance'] = np.ones(self.map['size']).reshape(-1,1) * self.prior       # size should be (number of data) x (1)
 
     def is_in_perceptual_field(self, m, p):
         # check if the map cell m is within the perception field of the
@@ -122,14 +132,14 @@ class ogm_CSM:
                         # To Do: 
                         # update the sensor model in cell i
                         # -----------------------------------------------
-                        # self.counting_sensor_model(self.map, self.m_i, self.z_max, self.w_obstacle, self.w_beam, ...)
+                        self.counting_sensor_model(self.map, self.m_i, self.z_max, self.w_obstacle, self.w_beam, z, i)
 
             # -----------------------------------------------
             # To Do: 
             # update mean and variance for each cell i
             # -----------------------------------------------
-            # self.map['mean'][i] = 
-            # self.map['variance'][i] = 
+            self.map['mean'][i] = self.map['alpha'][i] / (self.map['alpha'][i] + self.map['beta'][i])
+            self.map['variance'][i] = (self.map['alpha'][i] * self.map['beta'][i]) / ((self.map['alpha'][i] + self.map['beta'][i])**2 * (self.map['alpha'][i] + self.map['beta'][i] + 1))
 
 
 # This function is used to convert Cartesian to Polar

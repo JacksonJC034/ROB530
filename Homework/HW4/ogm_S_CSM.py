@@ -7,17 +7,28 @@ import numpy as np
 from scipy.spatial import KDTree
 from tqdm import tqdm
 
+
 def S_CSM(map, m_i, z_max, w_obstacle, w_beam, num_classes, z, i):
     bearing_diff = []
     # find the nearest beam
     bearing_diff = np.abs(wrapToPI(z[:, 1] - m_i['phi']))
     k = np.nanargmin(bearing_diff)
-    bearing_min = bearing_diff[k]
+    bearing_min = np.abs(bearing_diff[k])
     # -----------------------------------------------
     # To Do: 
     # implement the counting sensor model, update map['alpha']
     # Hint: the way to determine occupied or free is similar to
     # inverse sensor model
+    # Global coordinates of the cell m_i
+    if m_i['range'] > min(z_max, z[k, 0] + w_obstacle / 2) or bearing_min > w_beam / 2:
+        pass
+    elif z[k, 0] < z_max and abs(m_i['range'] - z[k, 0]) < w_obstacle / 2:
+        # update occupied grid
+        map['alpha'][i, int(z[k, 2]-1)] += 1
+    elif m_i['range'] < z[k, 0] and z[k, 0] < z_max:
+        # update free grid
+        map['alpha'][i, num_classes] += 1
+    
     # -----------------------------------------------
 
 
@@ -56,8 +67,8 @@ class ogm_S_CSM:
         # prior initialization
         # Initialize prior, prior_alpha
         # -----------------------------------------------
-        # self.prior =             # prior for setting up mean and variance
-        # self.prior_alpha =       # a small, uninformative prior for setting up alpha
+        self.prior = 1            # prior for setting up mean and variance
+        self.prior_alpha = 1      # a small, uninformative prior for setting up alpha
 
     def construct_map(self, pose, scan):
         # class constructor
@@ -82,9 +93,9 @@ class ogm_S_CSM:
         # To Do: 
         # Initialization map parameters such as map['mean'], map['variance'], map['alpha']
         # -----------------------------------------------
-        # self.map['mean'] =         # size should be (number of data) x (number of classes + 1)
-        # self.map['variance'] =     # size should be (number of data) x (1)
-        # self.map['alpha'] =        # size should be (number of data) x (number of classes + 1)
+        self.map['mean'] = self.prior * np.ones((self.map['size'], self.num_classes + 1))       # size should be (number of data) x (number of classes + 1)
+        self.map['variance'] = self.prior * np.ones((self.map['size'], 1))    # size should be (number of data) x (1)
+        self.map['alpha'] = self.prior_alpha * np.ones((self.map['size'], self.num_classes + 1))      # size should be (number of data) x (number of classes + 1)
 
     def is_in_perceptual_field(self, m, p):
         # check if the map cell m is within the perception field of the
@@ -123,14 +134,17 @@ class ogm_S_CSM:
                         # To Do: 
                         # update the sensor model in cell i
                         # -----------------------------------------------
-                        # self.S_CSM(self.map, self.m_i, self.z_max, self.w_obstacle, self.w_beam, self.num_classes, ...)
+                        self.S_CSM(self.map, self.m_i, self.z_max, self.w_obstacle, self.w_beam, self.num_classes, z, i)
 
             # -----------------------------------------------
             # To Do: 
             # update mean and variance for each cell i
             # -----------------------------------------------
-            # self.map['mean'][i] = 
-            # self.map['variance'][i] = 
+            alpha_sum = np.sum(self.map['alpha'][i, :])
+            # normalize mean values
+            self.map['mean'][i] = self.map['alpha'][i, :] / alpha_sum
+            
+            self.map['variance'][i] = (np.max(self.map['alpha'][i, :]) / alpha_sum * (1 - np.max(self.map['alpha'][i, :]) / alpha_sum)) / (alpha_sum + 1)
     
 
 # This function is used to convert Cartesian to Polar
